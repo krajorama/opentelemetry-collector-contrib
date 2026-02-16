@@ -33,10 +33,11 @@ var ReceiverPrometheusreceiverEnableReportExtraScrapeMetricsFeatureGate = featur
 
 var ReceiverPrometheusreceiverRemoveReportExtraScrapeMetricsConfigFeatureGate = featuregate.GlobalRegistry().MustRegister(
 	"receiver.prometheusreceiver.RemoveReportExtraScrapeMetricsConfig",
-	featuregate.StageBeta,
+	featuregate.StageStable,
 	featuregate.WithRegisterDescription("When enabled, the 'report_extra_scrape_metrics' configuration option is ignored, and extra scrape metrics are controlled solely by the EnableReportExtraScrapeMetrics feature gate. The intention is to have extra scrape metrics enabled all the time in the future."),
 	featuregate.WithRegisterReferenceURL("https://github.com/open-telemetry/opentelemetry-collector-contrib/issues/44181"),
 	featuregate.WithRegisterFromVersion("v0.143.0"),
+	featuregate.WithRegisterToVersion("v0.148.0"),
 )
 
 var ReceiverPrometheusreceiverRemoveStartTimeAdjustmentFeatureGate = featuregate.GlobalRegistry().MustRegister(
