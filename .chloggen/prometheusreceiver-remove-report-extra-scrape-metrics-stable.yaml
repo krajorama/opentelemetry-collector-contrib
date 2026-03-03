@@ -17,7 +17,7 @@ issues: [44181]
 # Use pipe (|) for multiline entries.
 subtext: |
   The `report_extra_scrape_metrics` configuration option is now fully ignored.
-  Extra scrape metrics are controlled solely by the `EnableReportExtraScrapeMetrics` feature gate.
+  Extra scrape metrics are controlled solely by the `EnableReportExtraScrapeMetrics` feature gate. If you have the configuration option `report_extra_scrape_metrics` set in your configuration file, please remove it to avoid crashes.
 
 # If your change doesn't affect end users or the exported elements of any package,
 # you should instead start your pull request title with [chore] or use the "Skip Changelog" label.
