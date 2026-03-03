@@ -25,10 +25,11 @@ var ReceiverPrometheusreceiverEnableNativeHistogramsFeatureGate = featuregate.Gl
 
 var ReceiverPrometheusreceiverEnableReportExtraScrapeMetricsFeatureGate = featuregate.GlobalRegistry().MustRegister(
 	"receiver.prometheusreceiver.EnableReportExtraScrapeMetrics",
-	featuregate.StageAlpha,
-	featuregate.WithRegisterDescription("Enables reporting of extra Prometheus scrape metrics. This replaces the deprecated 'report_extra_scrape_metrics' configuration option."),
+	featuregate.StageDeprecated,
+	featuregate.WithRegisterDescription("Enables reporting of extra Prometheus scrape metrics. This gate is deprecated, use the `extra_scrape_metrics` Prometheus scrape configuration instead."),
 	featuregate.WithRegisterReferenceURL("https://github.com/open-telemetry/opentelemetry-collector-contrib/issues/44181"),
 	featuregate.WithRegisterFromVersion("v0.143.0"),
+	featuregate.WithRegisterToVersion("v0.148.0"),
 )
 
 var ReceiverPrometheusreceiverRemoveReportExtraScrapeMetricsConfigFeatureGate = featuregate.GlobalRegistry().MustRegister(

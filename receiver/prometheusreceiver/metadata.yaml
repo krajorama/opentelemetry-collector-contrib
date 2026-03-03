@@ -40,11 +40,12 @@ feature_gates:
     reference_url: https://github.com/open-telemetry/opentelemetry-collector-contrib/pull/34473
 
   - id: receiver.prometheusreceiver.EnableReportExtraScrapeMetrics
-    stage: alpha
+    stage: deprecated
     description: >-
-      Enables reporting of extra Prometheus scrape metrics. This replaces the deprecated
-      'report_extra_scrape_metrics' configuration option.
+      Enables reporting of extra Prometheus scrape metrics. This gate is deprecated, use the
+      `extra_scrape_metrics` Prometheus scrape configuration instead.
     from_version: v0.143.0
+    to_version: v0.148.0
     reference_url: https://github.com/open-telemetry/opentelemetry-collector-contrib/issues/44181
 
   - id: receiver.prometheusreceiver.RemoveReportExtraScrapeMetricsConfig
