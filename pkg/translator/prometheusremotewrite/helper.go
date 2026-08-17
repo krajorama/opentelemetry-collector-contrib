@@ -160,23 +160,7 @@ func createAttributes(resource pcommon.Resource, attributes pcommon.Map, scope p
 		}
 	}
 
-	// Map service.name + service.namespace to job
-	if haveServiceName {
-		val := serviceName.AsString()
-		if val != "" {
-			if serviceNamespace, ok := resourceAttrs.Get(string(conventions.ServiceNamespaceKey)); ok {
-				val = fmt.Sprintf("%s/%s", serviceNamespace.AsString(), val)
-			}
-			l[model.JobLabel] = val
-		}
-	}
-	// Map service.instance.id to instance
-	if haveInstanceID {
-		val := instance.AsString()
-		if val != "" {
-			l[model.InstanceLabel] = val
-		}
-	}
+	setJobAndInstanceLabels(l, resourceAttrs, serviceName, haveServiceName, instance, haveInstanceID)
 	for key, value := range externalLabels {
 		// External labels have already been sanitized
 		if _, alreadyExists := l[key]; alreadyExists {
@@ -232,6 +216,115 @@ func createAttributes(resource pcommon.Resource, attributes pcommon.Map, scope p
 	}
 
 	return labels, nil
+}
+
+// setJobAndInstanceLabels sets the job and instance labels in l, honoring
+// whichever of the mutually exclusive job/instance identity option feature
+// gates (see featuregate.go) is enabled. With no gate enabled, job and
+// instance are always synthesized from service.name/service.namespace and
+// service.instance.id (legacy behavior).
+func setJobAndInstanceLabels(l map[string]string, resourceAttrs pcommon.Map, serviceName pcommon.Value, haveServiceName bool, instance pcommon.Value, haveInstanceID bool) {
+	switch {
+	case JobInstanceOptionAFeatureGate.IsEnabled():
+		setJobAndInstanceFromPair(l, resourceAttrs, bareJobAttr, bareInstanceAttr, serviceName, haveServiceName, instance, haveInstanceID)
+	case JobInstanceOptionBFeatureGate.IsEnabled():
+		setJobAndInstanceFromPair(l, resourceAttrs, namespacedJobAttr, namespacedInstanceAttr, serviceName, haveServiceName, instance, haveInstanceID)
+	case JobInstanceOptionCFeatureGate.IsEnabled():
+		if haveServiceName || haveInstanceID {
+			// Declared identity: unchanged legacy translation, the reserved
+			// pair (if any) is left as ordinary descriptive metadata.
+			setLegacyJobAndInstance(l, resourceAttrs, serviceName, haveServiceName, instance, haveInstanceID)
+			return
+		}
+		// Undeclared resource: fall back to the reserved pair, only when
+		// both job and instance are present and non-empty.
+		job, haveJob := resourceAttrs.Get(namespacedJobAttr)
+		inst, haveInst := resourceAttrs.Get(namespacedInstanceAttr)
+		if haveJob && haveInst && job.AsString() != "" && inst.AsString() != "" {
+			l[model.JobLabel] = job.AsString()
+			l[model.InstanceLabel] = inst.AsString()
+		}
+	default:
+		setLegacyJobAndInstance(l, resourceAttrs, serviceName, haveServiceName, instance, haveInstanceID)
+	}
+}
+
+// setLegacyJobAndInstance maps service.name(+service.namespace) to job and
+// service.instance.id to instance. This is the original, feature-gate
+// independent derivation.
+func setLegacyJobAndInstance(l map[string]string, resourceAttrs pcommon.Map, serviceName pcommon.Value, haveServiceName bool, instance pcommon.Value, haveInstanceID bool) {
+	if haveServiceName {
+		val := serviceName.AsString()
+		if val != "" {
+			if serviceNamespace, ok := resourceAttrs.Get(string(conventions.ServiceNamespaceKey)); ok {
+				val = fmt.Sprintf("%s/%s", serviceNamespace.AsString(), val)
+			}
+			l[model.JobLabel] = val
+		}
+	}
+	if haveInstanceID {
+		val := instance.AsString()
+		if val != "" {
+			l[model.InstanceLabel] = val
+		}
+	}
+}
+
+// setJobAndInstanceFromPair uses the job/instance resource attributes named
+// jobAttr/instanceAttr verbatim when present and non-empty (Option A/B's
+// pair-first lookup), independently falling back to the legacy
+// service.*-based derivation for whichever of job/instance is absent.
+func setJobAndInstanceFromPair(l map[string]string, resourceAttrs pcommon.Map, jobAttr, instanceAttr string, serviceName pcommon.Value, haveServiceName bool, instance pcommon.Value, haveInstanceID bool) {
+	if job, ok := resourceAttrs.Get(jobAttr); ok && job.AsString() != "" {
+		l[model.JobLabel] = job.AsString()
+	} else if haveServiceName {
+		val := serviceName.AsString()
+		if val != "" {
+			if serviceNamespace, ok := resourceAttrs.Get(string(conventions.ServiceNamespaceKey)); ok {
+				val = fmt.Sprintf("%s/%s", serviceNamespace.AsString(), val)
+			}
+			l[model.JobLabel] = val
+		}
+	}
+	if inst, ok := resourceAttrs.Get(instanceAttr); ok && inst.AsString() != "" {
+		l[model.InstanceLabel] = inst.AsString()
+	} else if haveInstanceID {
+		val := instance.AsString()
+		if val != "" {
+			l[model.InstanceLabel] = val
+		}
+	}
+}
+
+// identifyingAttrNames returns the resource attribute names that identify a
+// Resource for target_info purposes: service.namespace/service.name/
+// service.instance.id, plus — depending on which job/instance identity
+// option feature gate is enabled and, for Option C, whether the Resource
+// declares its own identity — the job/instance resource attributes that are
+// consumed as identity rather than surfaced as ordinary target_info
+// attributes.
+func identifyingAttrNames(resourceAttrs pcommon.Map) []string {
+	attrs := []string{
+		string(conventions.ServiceNamespaceKey),
+		string(conventions.ServiceNameKey),
+		string(conventions.ServiceInstanceIDKey),
+	}
+	switch {
+	case JobInstanceOptionAFeatureGate.IsEnabled():
+		attrs = append(attrs, bareJobAttr, bareInstanceAttr)
+	case JobInstanceOptionBFeatureGate.IsEnabled():
+		attrs = append(attrs, namespacedJobAttr, namespacedInstanceAttr)
+	case JobInstanceOptionCFeatureGate.IsEnabled():
+		_, haveServiceName := resourceAttrs.Get(string(conventions.ServiceNameKey))
+		_, haveInstanceID := resourceAttrs.Get(string(conventions.ServiceInstanceIDKey))
+		if !haveServiceName && !haveInstanceID {
+			// Undeclared resource: the reserved pair is being consumed as
+			// the identity fallback, so exclude it from target_info's
+			// ordinary attributes too.
+			attrs = append(attrs, namespacedJobAttr, namespacedInstanceAttr)
+		}
+	}
+	return attrs
 }
 
 // isValidAggregationTemporality checks whether an OTel metric has a valid
@@ -561,11 +654,7 @@ func addResourceTargetInfo(resource pcommon.Resource, settings Settings, timesta
 	}
 
 	attributes := resource.Attributes()
-	identifyingAttrs := []string{
-		string(conventions.ServiceNamespaceKey),
-		string(conventions.ServiceNameKey),
-		string(conventions.ServiceInstanceIDKey),
-	}
+	identifyingAttrs := identifyingAttrNames(attributes)
 	nonIdentifyingAttrsCount := attributes.Len()
 	for _, a := range identifyingAttrs {
 		_, haveAttr := attributes.Get(a)

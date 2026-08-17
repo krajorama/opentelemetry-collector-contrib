@@ -8,6 +8,7 @@ import (
 
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/collector/featuregate"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 )
 
@@ -273,4 +274,90 @@ func TestCreateNodeAndResourcePromToOTLP(t *testing.T) {
 			require.Equal(t, tt.want.Attributes().AsRaw(), got.Attributes().AsRaw())
 		})
 	}
+}
+
+func TestCreateResource_JobInstanceOptions(t *testing.T) {
+	tests := []struct {
+		name string
+		gate *featuregate.Gate
+		want map[string]any
+	}{
+		{
+			name: "no option gate enabled (legacy)",
+			gate: nil,
+			want: map[string]any{
+				"service.name":        "myjob",
+				"service.instance.id": "myhost:1234",
+				"server.address":      "myhost",
+				"server.port":         "1234",
+				"url.scheme":          "",
+			},
+		},
+		{
+			name: "option A: bare job/instance stored alongside service.* defaults",
+			gate: JobInstanceOptionAFeatureGate,
+			want: map[string]any{
+				"service.name":        "myjob",
+				"service.instance.id": "myhost:1234",
+				"job":                 "myjob",
+				"instance":            "myhost:1234",
+				"server.address":      "myhost",
+				"server.port":         "1234",
+				"url.scheme":          "",
+			},
+		},
+		{
+			name: "option B: namespaced job/instance stored alongside service.* defaults",
+			gate: JobInstanceOptionBFeatureGate,
+			want: map[string]any{
+				"service.name":        "myjob",
+				"service.instance.id": "myhost:1234",
+				"prometheus.job":      "myjob",
+				"prometheus.instance": "myhost:1234",
+				"server.address":      "myhost",
+				"server.port":         "1234",
+				"url.scheme":          "",
+			},
+		},
+		{
+			name: "option C: namespaced job/instance stored, service.* defaulting disabled",
+			gate: JobInstanceOptionCFeatureGate,
+			want: map[string]any{
+				"prometheus.job":      "myjob",
+				"prometheus.instance": "myhost:1234",
+				"server.address":      "myhost",
+				"server.port":         "1234",
+				"url.scheme":          "",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.gate != nil {
+				require.NoError(t, featuregate.GlobalRegistry().Set(tt.gate.ID(), true))
+				t.Cleanup(func() {
+					require.NoError(t, featuregate.GlobalRegistry().Set(tt.gate.ID(), false))
+				})
+			}
+			got := CreateResource("myjob", "myhost:1234", labels.EmptyLabels())
+			require.Equal(t, tt.want, got.Attributes().AsRaw())
+		})
+	}
+}
+
+func TestValidateJobInstanceOptionGates(t *testing.T) {
+	require.NoError(t, ValidateJobInstanceOptionGates())
+
+	require.NoError(t, featuregate.GlobalRegistry().Set(JobInstanceOptionAFeatureGate.ID(), true))
+	t.Cleanup(func() {
+		require.NoError(t, featuregate.GlobalRegistry().Set(JobInstanceOptionAFeatureGate.ID(), false))
+	})
+	require.NoError(t, ValidateJobInstanceOptionGates())
+
+	require.NoError(t, featuregate.GlobalRegistry().Set(JobInstanceOptionBFeatureGate.ID(), true))
+	t.Cleanup(func() {
+		require.NoError(t, featuregate.GlobalRegistry().Set(JobInstanceOptionBFeatureGate.ID(), false))
+	})
+	require.Error(t, ValidateJobInstanceOptionGates())
 }

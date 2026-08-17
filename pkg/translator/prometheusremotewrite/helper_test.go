@@ -18,6 +18,7 @@ import (
 	writev2 "github.com/prometheus/prometheus/prompb/io/prometheus/write/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/collector/featuregate"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/pmetric"
 
@@ -254,6 +255,7 @@ func Test_createLabelSet(t *testing.T) {
 		want                        []prompb.Label
 		expectErr                   bool
 		underscoreLabelSanitization bool
+		gate                        *featuregate.Gate
 	}{
 		{
 			name:           "labels_clean",
@@ -417,9 +419,103 @@ func Test_createLabelSet(t *testing.T) {
 			externalLabels: map[string]string{},
 			want:           getPromLabels(label11, value11, label12, value12),
 		},
+		{
+			name: "option_a_pair_present_used_verbatim",
+			resource: func() pcommon.Resource {
+				res := pcommon.NewResource()
+				res.Attributes().PutStr("service.name", "prometheus")
+				res.Attributes().PutStr("service.instance.id", "127.0.0.1:8080")
+				res.Attributes().PutStr("job", "reserved-job")
+				res.Attributes().PutStr("instance", "reserved-instance")
+				return res
+			}(),
+			orig:           lbs1,
+			externalLabels: map[string]string{},
+			extras:         []string{label31, value31, label32, value32},
+			gate:           JobInstanceOptionAFeatureGate,
+			want:           getPromLabels(label11, value11, label12, value12, label31, value31, label32, value32, "job", "reserved-job", "instance", "reserved-instance"),
+		},
+		{
+			name: "option_a_pair_absent_falls_back_to_service_name",
+			resource: func() pcommon.Resource {
+				res := pcommon.NewResource()
+				res.Attributes().PutStr("service.name", "prometheus")
+				res.Attributes().PutStr("service.instance.id", "127.0.0.1:8080")
+				return res
+			}(),
+			orig:           lbs1,
+			externalLabels: map[string]string{},
+			extras:         []string{label31, value31, label32, value32},
+			gate:           JobInstanceOptionAFeatureGate,
+			want:           getPromLabels(label11, value11, label12, value12, label31, value31, label32, value32, "job", "prometheus", "instance", "127.0.0.1:8080"),
+		},
+		{
+			name: "option_b_pair_present_used_verbatim",
+			resource: func() pcommon.Resource {
+				res := pcommon.NewResource()
+				res.Attributes().PutStr("service.name", "prometheus")
+				res.Attributes().PutStr("service.instance.id", "127.0.0.1:8080")
+				res.Attributes().PutStr("prometheus.job", "reserved-job")
+				res.Attributes().PutStr("prometheus.instance", "reserved-instance")
+				return res
+			}(),
+			orig:           lbs1,
+			externalLabels: map[string]string{},
+			extras:         []string{label31, value31, label32, value32},
+			gate:           JobInstanceOptionBFeatureGate,
+			want:           getPromLabels(label11, value11, label12, value12, label31, value31, label32, value32, "job", "reserved-job", "instance", "reserved-instance"),
+		},
+		{
+			name: "option_c_declared_identity_wins_over_reserved_pair",
+			resource: func() pcommon.Resource {
+				res := pcommon.NewResource()
+				res.Attributes().PutStr("service.name", "prometheus")
+				res.Attributes().PutStr("prometheus.job", "reserved-job")
+				res.Attributes().PutStr("prometheus.instance", "reserved-instance")
+				return res
+			}(),
+			orig:           lbs1,
+			externalLabels: map[string]string{},
+			extras:         []string{label31, value31, label32, value32},
+			gate:           JobInstanceOptionCFeatureGate,
+			want:           getPromLabels(label11, value11, label12, value12, label31, value31, label32, value32, "job", "prometheus"),
+		},
+		{
+			name: "option_c_no_declared_identity_uses_reserved_pair_fallback",
+			resource: func() pcommon.Resource {
+				res := pcommon.NewResource()
+				res.Attributes().PutStr("prometheus.job", "reserved-job")
+				res.Attributes().PutStr("prometheus.instance", "reserved-instance")
+				return res
+			}(),
+			orig:           lbs1,
+			externalLabels: map[string]string{},
+			extras:         []string{label31, value31, label32, value32},
+			gate:           JobInstanceOptionCFeatureGate,
+			want:           getPromLabels(label11, value11, label12, value12, label31, value31, label32, value32, "job", "reserved-job", "instance", "reserved-instance"),
+		},
+		{
+			name: "option_c_partial_reserved_pair_no_fallback",
+			resource: func() pcommon.Resource {
+				res := pcommon.NewResource()
+				res.Attributes().PutStr("prometheus.job", "reserved-job")
+				return res
+			}(),
+			orig:           lbs1,
+			externalLabels: map[string]string{},
+			extras:         []string{label31, value31, label32, value32},
+			gate:           JobInstanceOptionCFeatureGate,
+			want:           getPromLabels(label11, value11, label12, value12, label31, value31, label32, value32),
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			if tt.gate != nil {
+				require.NoError(t, featuregate.GlobalRegistry().Set(tt.gate.ID(), true))
+				t.Cleanup(func() {
+					require.NoError(t, featuregate.GlobalRegistry().Set(tt.gate.ID(), false))
+				})
+			}
 			labelNamer := otlptranslator.LabelNamer{
 				UnderscoreLabelSanitization: tt.underscoreLabelSanitization,
 			}
@@ -745,11 +841,31 @@ func TestAddResourceTargetInfo(t *testing.T) {
 	resourceWithOnlyServiceID := pcommon.NewResource()
 	resourceWithOnlyServiceID.Attributes().PutStr("service.instance.id", "service-instance-id")
 	resourceWithOnlyServiceID.Attributes().PutStr("resource_attr", "resource-attr-val-1")
+	resourceWithBareJobInstanceOnly := pcommon.NewResource()
+	resourceWithBareJobInstanceOnly.Attributes().PutStr("job", "reserved-job")
+	resourceWithBareJobInstanceOnly.Attributes().PutStr("instance", "reserved-instance")
+
+	resourceWithNamespacedPairOnly := pcommon.NewResource()
+	resourceWithNamespacedPairOnly.Attributes().PutStr("prometheus.job", "reserved-job")
+	resourceWithNamespacedPairOnly.Attributes().PutStr("prometheus.instance", "reserved-instance")
+
+	resourceWithDeclaredIdentityAndPair := pcommon.NewResource()
+	resourceWithDeclaredIdentityAndPair.Attributes().PutStr("service.name", "service-name")
+	resourceWithDeclaredIdentityAndPair.Attributes().PutStr("prometheus.job", "reserved-job")
+	resourceWithDeclaredIdentityAndPair.Attributes().PutStr("prometheus.instance", "reserved-instance")
+	resourceWithDeclaredIdentityAndPair.Attributes().PutStr("resource_attr", "resource-attr-val-1")
+
+	resourceWithUndeclaredPairAndOtherAttr := pcommon.NewResource()
+	resourceWithUndeclaredPairAndOtherAttr.Attributes().PutStr("prometheus.job", "reserved-job")
+	resourceWithUndeclaredPairAndOtherAttr.Attributes().PutStr("prometheus.instance", "reserved-instance")
+	resourceWithUndeclaredPairAndOtherAttr.Attributes().PutStr("resource_attr", "resource-attr-val-1")
+
 	for _, tc := range []struct {
 		desc       string
 		resource   pcommon.Resource
 		settings   Settings
 		timestamp  pcommon.Timestamp
+		gate       *featuregate.Gate
 		wantLabels []prompb.Label
 	}{
 		{
@@ -819,8 +935,57 @@ func TestAddResourceTargetInfo(t *testing.T) {
 			resource:  resourceWithServiceAttrs,
 			timestamp: 0,
 		},
+		{
+			desc:      "option A: bare job/instance only, no target_info (mirrors job+instance-only skip)",
+			resource:  resourceWithBareJobInstanceOnly,
+			timestamp: testdata.TestMetricStartTimestamp,
+			gate:      JobInstanceOptionAFeatureGate,
+		},
+		{
+			desc:      "option B: namespaced pair only, no target_info (mirrors job+instance-only skip)",
+			resource:  resourceWithNamespacedPairOnly,
+			timestamp: testdata.TestMetricStartTimestamp,
+			gate:      JobInstanceOptionBFeatureGate,
+		},
+		{
+			desc:      "option C: declared identity present, reserved pair stays descriptive on target_info",
+			resource:  resourceWithDeclaredIdentityAndPair,
+			timestamp: testdata.TestMetricStartTimestamp,
+			gate:      JobInstanceOptionCFeatureGate,
+			wantLabels: []prompb.Label{
+				{Name: model.MetricNameLabel, Value: "target_info"},
+				{Name: model.JobLabel, Value: "service-name"},
+				{Name: "resource_attr", Value: "resource-attr-val-1"},
+				{Name: "prometheus_job", Value: "reserved-job"},
+				{Name: "prometheus_instance", Value: "reserved-instance"},
+			},
+		},
+		{
+			desc:      "option C: no declared identity, reserved pair used as fallback and not duplicated",
+			resource:  resourceWithUndeclaredPairAndOtherAttr,
+			timestamp: testdata.TestMetricStartTimestamp,
+			gate:      JobInstanceOptionCFeatureGate,
+			wantLabels: []prompb.Label{
+				{Name: model.MetricNameLabel, Value: "target_info"},
+				{Name: model.JobLabel, Value: "reserved-job"},
+				{Name: model.InstanceLabel, Value: "reserved-instance"},
+				{Name: "resource_attr", Value: "resource-attr-val-1"},
+			},
+		},
+		{
+			desc:      "option C: no declared identity, only reserved pair present, no target_info",
+			resource:  resourceWithNamespacedPairOnly,
+			timestamp: testdata.TestMetricStartTimestamp,
+			gate:      JobInstanceOptionCFeatureGate,
+		},
 	} {
 		t.Run(tc.desc, func(t *testing.T) {
+			if tc.gate != nil {
+				require.NoError(t, featuregate.GlobalRegistry().Set(tc.gate.ID(), true))
+				t.Cleanup(func() {
+					require.NoError(t, featuregate.GlobalRegistry().Set(tc.gate.ID(), false))
+				})
+			}
 			converter := newPrometheusConverter(tc.settings)
 
 			err := addResourceTargetInfo(tc.resource, tc.settings, tc.timestamp, converter)

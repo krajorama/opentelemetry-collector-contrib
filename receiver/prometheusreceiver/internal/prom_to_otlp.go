@@ -31,6 +31,16 @@ func isDiscernibleHost(host string) bool {
 	return true
 }
 
+// Bare and namespaced resource attribute names used to preserve Prometheus
+// scrape identity, per the job/instance identity option feature gates
+// (JobInstanceOptionAFeatureGate / B / C).
+const (
+	bareJobAttr            = "job"
+	bareInstanceAttr       = "instance"
+	namespacedJobAttr      = "prometheus.job"
+	namespacedInstanceAttr = "prometheus.instance"
+)
+
 // CreateResource creates the resource data added to OTLP payloads.
 func CreateResource(job, instance string, serviceDiscoveryLabels labels.Labels) pcommon.Resource {
 	host, port, err := net.SplitHostPort(instance)
@@ -39,11 +49,33 @@ func CreateResource(job, instance string, serviceDiscoveryLabels labels.Labels) 
 	}
 	resource := pcommon.NewResource()
 	attrs := resource.Attributes()
-	attrs.PutStr(string(conventions.ServiceNameKey), job)
+
+	switch {
+	case JobInstanceOptionAFeatureGate.IsEnabled():
+		attrs.PutStr(bareJobAttr, job)
+		attrs.PutStr(bareInstanceAttr, instance)
+		attrs.PutStr(string(conventions.ServiceNameKey), job)
+		attrs.PutStr(string(conventions.ServiceInstanceIDKey), instance)
+	case JobInstanceOptionBFeatureGate.IsEnabled():
+		attrs.PutStr(namespacedJobAttr, job)
+		attrs.PutStr(namespacedInstanceAttr, instance)
+		attrs.PutStr(string(conventions.ServiceNameKey), job)
+		attrs.PutStr(string(conventions.ServiceInstanceIDKey), instance)
+	case JobInstanceOptionCFeatureGate.IsEnabled():
+		attrs.PutStr(namespacedJobAttr, job)
+		attrs.PutStr(namespacedInstanceAttr, instance)
+		// Never-derive: service.name/service.instance.id are left absent here.
+		// AddTargetInfo fills them in later, only if the target declares its
+		// own identity via target_info; otherwise the reserved pair above is
+		// the resource's identity fallback on the OTLP -> Prometheus side.
+	default:
+		attrs.PutStr(string(conventions.ServiceNameKey), job)
+		attrs.PutStr(string(conventions.ServiceInstanceIDKey), instance)
+	}
+
 	if isDiscernibleHost(host) {
 		attrs.PutStr(string(conventions.ServerAddressKey), host)
 	}
-	attrs.PutStr(string(conventions.ServiceInstanceIDKey), instance)
 	attrs.PutStr(string(conventions.ServerPortKey), port)
 	attrs.PutStr(string(conventions.URLSchemeKey), serviceDiscoveryLabels.Get(model.SchemeLabel))
 

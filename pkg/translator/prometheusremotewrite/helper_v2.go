@@ -14,7 +14,6 @@ import (
 	writev2 "github.com/prometheus/prometheus/prompb/io/prometheus/write/v2"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/pmetric"
-	conventions "go.opentelemetry.io/otel/semconv/v1.40.0"
 	"go.uber.org/multierr"
 )
 
@@ -25,11 +24,7 @@ func (c *prometheusConverterV2) addResourceTargetInfoV2(resource pcommon.Resourc
 	}
 
 	attributes := resource.Attributes()
-	identifyingAttrs := []string{
-		string(conventions.ServiceNamespaceKey),
-		string(conventions.ServiceNameKey),
-		string(conventions.ServiceInstanceIDKey),
-	}
+	identifyingAttrs := identifyingAttrNames(attributes)
 	nonIdentifyingAttrsCount := attributes.Len()
 	for _, a := range identifyingAttrs {
 		_, haveAttr := attributes.Get(a)

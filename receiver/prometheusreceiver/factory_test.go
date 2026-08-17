@@ -14,8 +14,10 @@ import (
 	"go.opentelemetry.io/collector/config/confignet"
 	"go.opentelemetry.io/collector/confmap/confmaptest"
 	"go.opentelemetry.io/collector/consumer/consumertest"
+	"go.opentelemetry.io/collector/featuregate"
 	"go.opentelemetry.io/collector/receiver/receivertest"
 
+	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/prometheusreceiver/internal"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/prometheusreceiver/internal/apiserver"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/prometheusreceiver/internal/metadata"
 )
@@ -35,6 +37,24 @@ func TestCreateReceiver(t *testing.T) {
 	mReceiver, _ := createMetricsReceiver(t.Context(), creationSet, cfg, consumertest.NewNop())
 	assert.NotNil(t, mReceiver)
 	assert.NotNil(t, mReceiver.(*pReceiver).cfg.PrometheusConfig.GlobalConfig)
+}
+
+func TestCreateReceiver_RejectsMultipleJobInstanceOptionGates(t *testing.T) {
+	cfg := createDefaultConfig()
+	creationSet := receivertest.NewNopSettings(metadata.Type)
+
+	require.NoError(t, featuregate.GlobalRegistry().Set(internal.JobInstanceOptionAFeatureGate.ID(), true))
+	t.Cleanup(func() {
+		require.NoError(t, featuregate.GlobalRegistry().Set(internal.JobInstanceOptionAFeatureGate.ID(), false))
+	})
+	require.NoError(t, featuregate.GlobalRegistry().Set(internal.JobInstanceOptionBFeatureGate.ID(), true))
+	t.Cleanup(func() {
+		require.NoError(t, featuregate.GlobalRegistry().Set(internal.JobInstanceOptionBFeatureGate.ID(), false))
+	})
+
+	mReceiver, err := createMetricsReceiver(t.Context(), creationSet, cfg, consumertest.NewNop())
+	require.Error(t, err)
+	assert.Nil(t, mReceiver)
 }
 
 func TestFactoryCanParseServiceDiscoveryConfigs(t *testing.T) {

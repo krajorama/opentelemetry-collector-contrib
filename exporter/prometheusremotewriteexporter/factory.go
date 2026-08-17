@@ -19,6 +19,7 @@ import (
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/exporter/prometheusremotewriteexporter/internal/metadata"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/resourcetotelemetry"
+	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/translator/prometheusremotewrite"
 )
 
 // NewFactory creates a new Prometheus Remote Write exporter.
@@ -37,6 +38,10 @@ func createMetricsExporter(ctx context.Context, set exporter.Settings,
 	prwCfg, ok := cfg.(*Config)
 	if !ok {
 		return nil, errors.New("invalid configuration")
+	}
+
+	if err := prometheusremotewrite.ValidateJobInstanceOptionGates(); err != nil {
+		return nil, err
 	}
 
 	if !metadata.ExporterPrometheusremotewritexporterEnableMultipleWorkersFeatureGate.IsEnabled() && prwCfg.RemoteWriteQueue.NumConsumers != 5 {

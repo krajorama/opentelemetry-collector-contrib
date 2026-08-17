@@ -7,14 +7,17 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/component/componenttest"
 	"go.opentelemetry.io/collector/config/confighttp"
 	"go.opentelemetry.io/collector/config/configtls"
 	"go.opentelemetry.io/collector/exporter"
 	"go.opentelemetry.io/collector/exporter/exportertest"
+	"go.opentelemetry.io/collector/featuregate"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/exporter/prometheusremotewriteexporter/internal/metadata"
+	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/translator/prometheusremotewrite"
 )
 
 // Tests whether or not the default Exporter factory can instantiate a properly interfaced Exporter with default conditions
@@ -93,4 +96,19 @@ func Test_createMetricsExporter(t *testing.T) {
 			assert.NoError(t, exp.Shutdown(t.Context()))
 		})
 	}
+}
+
+func Test_createMetricsExporter_RejectsMultipleJobInstanceOptionGates(t *testing.T) {
+	require.NoError(t, featuregate.GlobalRegistry().Set(prometheusremotewrite.JobInstanceOptionAFeatureGate.ID(), true))
+	t.Cleanup(func() {
+		require.NoError(t, featuregate.GlobalRegistry().Set(prometheusremotewrite.JobInstanceOptionAFeatureGate.ID(), false))
+	})
+	require.NoError(t, featuregate.GlobalRegistry().Set(prometheusremotewrite.JobInstanceOptionCFeatureGate.ID(), true))
+	t.Cleanup(func() {
+		require.NoError(t, featuregate.GlobalRegistry().Set(prometheusremotewrite.JobInstanceOptionCFeatureGate.ID(), false))
+	})
+
+	exp, err := createMetricsExporter(t.Context(), exportertest.NewNopSettings(metadata.Type), createDefaultConfig())
+	require.Error(t, err)
+	assert.Nil(t, exp)
 }
