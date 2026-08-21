@@ -1001,6 +1001,42 @@ func TestAddResourceTargetInfo(t *testing.T) {
 			gate:      JobInstanceOptionBFeatureGate,
 		},
 		{
+			desc:      "option B: declared identity present, pair used as metric identity and service.name emitted on target_info",
+			resource:  resourceWithDeclaredIdentityAndPair,
+			timestamp: testdata.TestMetricStartTimestamp,
+			gate:      JobInstanceOptionBFeatureGate,
+			wantLabels: []prompb.Label{
+				{Name: model.MetricNameLabel, Value: "target_info"},
+				{Name: model.InstanceLabel, Value: "reserved-instance"},
+				{Name: model.JobLabel, Value: "reserved-job"},
+				{Name: "resource_attr", Value: "resource-attr-val-1"},
+				{Name: "service_name", Value: "service-name"},
+			},
+		},
+		{
+			desc: "option B: with NoTranslation, service.name and server.address emitted with dots on target_info",
+			resource: func() pcommon.Resource {
+				r := pcommon.NewResource()
+				r.Attributes().PutStr("service.name", "my_service")
+				r.Attributes().PutStr("service.instance.id", "my_id")
+				r.Attributes().PutStr("prometheus.job", "my_job")
+				r.Attributes().PutStr("prometheus.instance", "oteljob:9464")
+				r.Attributes().PutStr("server.address", "oteljob")
+				return r
+			}(),
+			timestamp: testdata.TestMetricStartTimestamp,
+			settings:  Settings{TranslationStrategy: "NoTranslation"},
+			gate:      JobInstanceOptionBFeatureGate,
+			wantLabels: []prompb.Label{
+				{Name: model.MetricNameLabel, Value: "target_info"},
+				{Name: model.InstanceLabel, Value: "oteljob:9464"},
+				{Name: model.JobLabel, Value: "my_job"},
+				{Name: "server.address", Value: "oteljob"},
+				{Name: "service.instance.id", Value: "my_id"},
+				{Name: "service.name", Value: "my_service"},
+			},
+		},
+		{
 			desc:      "option C: declared identity present, reserved pair stays descriptive on target_info",
 			resource:  resourceWithDeclaredIdentityAndPair,
 			timestamp: testdata.TestMetricStartTimestamp,

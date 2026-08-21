@@ -302,17 +302,39 @@ func setJobAndInstanceFromPair(l map[string]string, resourceAttrs pcommon.Map, j
 // consumed as identity rather than surfaced as ordinary target_info
 // attributes.
 func identifyingAttrNames(resourceAttrs pcommon.Map) []string {
-	attrs := []string{
-		string(conventions.ServiceNamespaceKey),
-		string(conventions.ServiceNameKey),
-		string(conventions.ServiceInstanceIDKey),
-	}
 	switch {
 	case JobInstanceOptionAFeatureGate.IsEnabled():
-		attrs = append(attrs, bareJobAttr, bareInstanceAttr)
+		var attrs []string
+		if _, ok := resourceAttrs.Get(bareJobAttr); ok {
+			attrs = append(attrs, bareJobAttr)
+		} else {
+			attrs = append(attrs, string(conventions.ServiceNameKey), string(conventions.ServiceNamespaceKey))
+		}
+		if _, ok := resourceAttrs.Get(bareInstanceAttr); ok {
+			attrs = append(attrs, bareInstanceAttr)
+		} else {
+			attrs = append(attrs, string(conventions.ServiceInstanceIDKey))
+		}
+		return attrs
 	case JobInstanceOptionBFeatureGate.IsEnabled():
-		attrs = append(attrs, namespacedJobAttr, namespacedInstanceAttr)
+		var attrs []string
+		if _, ok := resourceAttrs.Get(namespacedJobAttr); ok {
+			attrs = append(attrs, namespacedJobAttr)
+		} else {
+			attrs = append(attrs, string(conventions.ServiceNameKey), string(conventions.ServiceNamespaceKey))
+		}
+		if _, ok := resourceAttrs.Get(namespacedInstanceAttr); ok {
+			attrs = append(attrs, namespacedInstanceAttr)
+		} else {
+			attrs = append(attrs, string(conventions.ServiceInstanceIDKey))
+		}
+		return attrs
 	case JobInstanceOptionCFeatureGate.IsEnabled(), JobInstanceOptionC1FeatureGate.IsEnabled():
+		attrs := []string{
+			string(conventions.ServiceNamespaceKey),
+			string(conventions.ServiceNameKey),
+			string(conventions.ServiceInstanceIDKey),
+		}
 		_, haveServiceName := resourceAttrs.Get(string(conventions.ServiceNameKey))
 		_, haveInstanceID := resourceAttrs.Get(string(conventions.ServiceInstanceIDKey))
 		if !haveServiceName && !haveInstanceID {
@@ -321,8 +343,14 @@ func identifyingAttrNames(resourceAttrs pcommon.Map) []string {
 			// ordinary attributes too.
 			attrs = append(attrs, namespacedJobAttr, namespacedInstanceAttr)
 		}
+		return attrs
+	default:
+		return []string{
+			string(conventions.ServiceNamespaceKey),
+			string(conventions.ServiceNameKey),
+			string(conventions.ServiceInstanceIDKey),
+		}
 	}
-	return attrs
 }
 
 // isValidAggregationTemporality checks whether an OTel metric has a valid
