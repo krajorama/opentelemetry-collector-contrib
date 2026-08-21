@@ -969,6 +969,26 @@ func TestAddResourceTargetInfo(t *testing.T) {
 			timestamp: 0,
 		},
 		{
+			desc: "with resource, NoTranslation strategy preserves dots in attribute names",
+			resource: func() pcommon.Resource {
+				r := pcommon.NewResource()
+				r.Attributes().PutStr("service.name", "my_service")
+				r.Attributes().PutStr("service.instance.id", "my_id")
+				r.Attributes().PutStr("server.address", "oteljob")
+				r.Attributes().PutStr("server.port", "9464")
+				return r
+			}(),
+			timestamp: testdata.TestMetricStartTimestamp,
+			settings:  Settings{TranslationStrategy: "NoTranslation"},
+			wantLabels: []prompb.Label{
+				{Name: model.MetricNameLabel, Value: "target_info"},
+				{Name: model.InstanceLabel, Value: "my_id"},
+				{Name: model.JobLabel, Value: "my_service"},
+				{Name: "server.address", Value: "oteljob"},
+				{Name: "server.port", Value: "9464"},
+			},
+		},
+		{
 			desc:      "option A: bare job/instance only, no target_info (mirrors job+instance-only skip)",
 			resource:  resourceWithBareJobInstanceOnly,
 			timestamp: testdata.TestMetricStartTimestamp,
