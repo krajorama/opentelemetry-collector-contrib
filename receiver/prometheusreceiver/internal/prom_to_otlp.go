@@ -33,7 +33,7 @@ func isDiscernibleHost(host string) bool {
 
 // Bare and namespaced resource attribute names used to preserve Prometheus
 // scrape identity, per the job/instance identity option feature gates
-// (JobInstanceOptionAFeatureGate / B / C).
+// (JobInstanceOptionAFeatureGate / B / C / C1).
 const (
 	bareJobAttr            = "job"
 	bareInstanceAttr       = "instance"
@@ -61,7 +61,7 @@ func CreateResource(job, instance string, serviceDiscoveryLabels labels.Labels) 
 		attrs.PutStr(namespacedInstanceAttr, instance)
 		attrs.PutStr(string(conventions.ServiceNameKey), job)
 		attrs.PutStr(string(conventions.ServiceInstanceIDKey), instance)
-	case JobInstanceOptionCFeatureGate.IsEnabled():
+	case JobInstanceOptionCFeatureGate.IsEnabled(), JobInstanceOptionC1FeatureGate.IsEnabled():
 		attrs.PutStr(namespacedJobAttr, job)
 		attrs.PutStr(namespacedInstanceAttr, instance)
 		// Never-derive: service.name/service.instance.id are left absent here.

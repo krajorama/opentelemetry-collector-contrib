@@ -229,7 +229,7 @@ func setJobAndInstanceLabels(l map[string]string, resourceAttrs pcommon.Map, ser
 		setJobAndInstanceFromPair(l, resourceAttrs, bareJobAttr, bareInstanceAttr, serviceName, haveServiceName, instance, haveInstanceID)
 	case JobInstanceOptionBFeatureGate.IsEnabled():
 		setJobAndInstanceFromPair(l, resourceAttrs, namespacedJobAttr, namespacedInstanceAttr, serviceName, haveServiceName, instance, haveInstanceID)
-	case JobInstanceOptionCFeatureGate.IsEnabled():
+	case JobInstanceOptionCFeatureGate.IsEnabled(), JobInstanceOptionC1FeatureGate.IsEnabled():
 		if haveServiceName || haveInstanceID {
 			// Declared identity: unchanged legacy translation, the reserved
 			// pair (if any) is left as ordinary descriptive metadata.
@@ -314,7 +314,7 @@ func identifyingAttrNames(resourceAttrs pcommon.Map) []string {
 		attrs = append(attrs, bareJobAttr, bareInstanceAttr)
 	case JobInstanceOptionBFeatureGate.IsEnabled():
 		attrs = append(attrs, namespacedJobAttr, namespacedInstanceAttr)
-	case JobInstanceOptionCFeatureGate.IsEnabled():
+	case JobInstanceOptionCFeatureGate.IsEnabled(), JobInstanceOptionC1FeatureGate.IsEnabled():
 		_, haveServiceName := resourceAttrs.Get(string(conventions.ServiceNameKey))
 		_, haveInstanceID := resourceAttrs.Get(string(conventions.ServiceInstanceIDKey))
 		if !haveServiceName && !haveInstanceID {

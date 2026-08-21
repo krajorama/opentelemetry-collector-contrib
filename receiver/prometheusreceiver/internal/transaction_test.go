@@ -22,6 +22,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer/consumertest"
+	"go.opentelemetry.io/collector/featuregate"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.opentelemetry.io/collector/receiver/receiverhelper"
@@ -2102,6 +2103,105 @@ func TestAddTargetInfo_DoesNotCopyJobInstanceOrMetricName(t *testing.T) {
 	require.False(t, hasName, "metric name label must not be copied to resource attributes")
 	require.True(t, hasExtra, "custom label should be copied")
 	require.True(t, hasAnother, "custom label should be copied")
+}
+
+func TestAddTargetInfo_CoveredNameRecognition(t *testing.T) {
+	tests := []struct {
+		name       string
+		gate       *featuregate.Gate
+		extraLs    []string
+		wantAttrs  map[string]any
+		absentKeys []string
+	}{
+		{
+			name: "option C1: flattened service_name is not recognized, stays an ordinary attribute",
+			gate: JobInstanceOptionC1FeatureGate,
+			extraLs: []string{
+				"service_name", "my_service",
+				"service_instance_id", "my_instance_id",
+			},
+			wantAttrs: map[string]any{
+				"prometheus.job":      "job-a",
+				"prometheus.instance": "localhost:1234",
+				"service_name":        "my_service",
+				"service_instance_id": "my_instance_id",
+			},
+			absentKeys: []string{"service.name", "service.instance.id"},
+		},
+		{
+			name: "option C: flattened service_name/service_instance_id are recognized as declared identity",
+			gate: JobInstanceOptionCFeatureGate,
+			extraLs: []string{
+				"service_name", "my_service",
+				"service_instance_id", "my_instance_id",
+			},
+			wantAttrs: map[string]any{
+				"prometheus.job":      "job-a",
+				"prometheus.instance": "localhost:1234",
+				"service.name":        "my_service",
+				"service.instance.id": "my_instance_id",
+			},
+			absentKeys: []string{"service_name", "service_instance_id"},
+		},
+		{
+			name: "option C: agreeing dotted and flattened spellings collapse to one",
+			gate: JobInstanceOptionCFeatureGate,
+			extraLs: []string{
+				"service.name", "my_service",
+				"service_name", "my_service",
+			},
+			wantAttrs: map[string]any{
+				"prometheus.job":      "job-a",
+				"prometheus.instance": "localhost:1234",
+				"service.name":        "my_service",
+			},
+			absentKeys: []string{"service_name"},
+		},
+		{
+			name: "option C: conflicting dotted and flattened spellings omit the covered attribute entirely",
+			gate: JobInstanceOptionCFeatureGate,
+			extraLs: []string{
+				"service.name", "dotted-value",
+				"service_name", "flattened-value",
+			},
+			wantAttrs: map[string]any{
+				"prometheus.job":      "job-a",
+				"prometheus.instance": "localhost:1234",
+			},
+			absentKeys: []string{"service.name", "service_name"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.NoError(t, featuregate.GlobalRegistry().Set(tt.gate.ID(), true))
+			t.Cleanup(func() {
+				require.NoError(t, featuregate.GlobalRegistry().Set(tt.gate.ID(), false))
+			})
+
+			tr := newTxn(t, false)
+			rk := resourceKey{job: "job-a", instance: "localhost:1234"}
+			tr.nodeResources[rk] = CreateResource(rk.job, rk.instance, labels.FromStrings(model.SchemeLabel, "http"))
+
+			lsPairs := append([]string{
+				string(model.MetricNameLabel), "target_info",
+				string(model.JobLabel), rk.job,
+				string(model.InstanceLabel), rk.instance,
+			}, tt.extraLs...)
+			tr.AddTargetInfo(rk, labels.FromStrings(lsPairs...))
+
+			attrs := tr.nodeResources[rk].Attributes()
+			for k, v := range tt.wantAttrs {
+				got, ok := attrs.Get(k)
+				require.True(t, ok, "expected attribute %q to be present", k)
+				require.Equal(t, v, got.AsString(), "attribute %q value mismatch", k)
+			}
+			for _, k := range tt.absentKeys {
+				_, ok := attrs.Get(k)
+				require.False(t, ok, "expected attribute %q to be absent", k)
+			}
+		})
+	}
 }
 
 func newTxn(t *testing.T, useMetadata bool) *transaction {

@@ -24,4 +24,11 @@ func TestValidateJobInstanceOptionGates(t *testing.T) {
 		require.NoError(t, featuregate.GlobalRegistry().Set(JobInstanceOptionCFeatureGate.ID(), false))
 	})
 	require.Error(t, ValidateJobInstanceOptionGates())
+
+	require.NoError(t, featuregate.GlobalRegistry().Set(JobInstanceOptionCFeatureGate.ID(), false))
+	require.NoError(t, featuregate.GlobalRegistry().Set(JobInstanceOptionC1FeatureGate.ID(), true))
+	t.Cleanup(func() {
+		require.NoError(t, featuregate.GlobalRegistry().Set(JobInstanceOptionC1FeatureGate.ID(), false))
+	})
+	require.Error(t, ValidateJobInstanceOptionGates(), "option A and option C1 together must be rejected")
 }

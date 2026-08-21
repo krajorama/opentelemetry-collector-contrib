@@ -56,24 +56,37 @@ var (
 		featuregate.StageAlpha,
 		featuregate.WithRegisterDescription("POC (Option C): prefer declared service.name/service.instance.id identity; fall back to namespaced `prometheus.job`/`prometheus.instance` resource attributes only when neither is declared."),
 	)
+
+	// JobInstanceOptionC1FeatureGate is Option C's consumer-side (OTLP ->
+	// Prometheus) behavior, unchanged: declared-identity-first with the
+	// namespaced pair as a fallback. Option C and Option C1 differ only on
+	// the producer (receiver) side — see the receiver's
+	// JobInstanceOptionC1FeatureGate — so this gate is handled identically
+	// to JobInstanceOptionCFeatureGate everywhere in this package.
+	JobInstanceOptionC1FeatureGate = featuregate.GlobalRegistry().MustRegister(
+		"exporter.prometheusremotewrite.jobInstanceOptionC1",
+		featuregate.StageAlpha,
+		featuregate.WithRegisterDescription("POC (Option C.1): same consumer-side behavior as Option C (declared identity first, namespaced pair as fallback); the two options only differ on the producer/receiver side."),
+	)
 )
 
 // ValidateJobInstanceOptionGates returns an error if more than one of the
 // mutually exclusive job/instance identity option feature gates (Option
-// A/B/C) is enabled at the same time.
+// A/B/C/C1) is enabled at the same time.
 func ValidateJobInstanceOptionGates() error {
 	enabled := 0
 	for _, g := range []*featuregate.Gate{
 		JobInstanceOptionAFeatureGate,
 		JobInstanceOptionBFeatureGate,
 		JobInstanceOptionCFeatureGate,
+		JobInstanceOptionC1FeatureGate,
 	} {
 		if g.IsEnabled() {
 			enabled++
 		}
 	}
 	if enabled > 1 {
-		return errors.New("only one of the exporter.prometheusremotewrite.jobInstanceOption{A,B,C} feature gates may be enabled at a time")
+		return errors.New("only one of the exporter.prometheusremotewrite.jobInstanceOption{A,B,C,C1} feature gates may be enabled at a time")
 	}
 	return nil
 }

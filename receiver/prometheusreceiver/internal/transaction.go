@@ -24,6 +24,7 @@ import (
 	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.opentelemetry.io/collector/receiver"
 	"go.opentelemetry.io/collector/receiver/receiverhelper"
+	conventions "go.opentelemetry.io/otel/semconv/v1.40.0"
 	"go.uber.org/zap"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/pdatautil"
@@ -621,15 +622,96 @@ func (*transaction) updateMetadata(_ storage.SeriesRef, _ labels.Labels, _ metad
 func (t *transaction) AddTargetInfo(key resourceKey, ls labels.Labels) {
 	t.addingNativeHistogram = false
 	t.addingNHCB = false
-	if resource, ok := t.nodeResources[key]; ok {
-		attrs := resource.Attributes()
-		ls.Range(func(lbl labels.Label) {
-			if lbl.Name == model.JobLabel || lbl.Name == model.InstanceLabel || lbl.Name == model.MetricNameLabel {
-				return
-			}
-			attrs.PutStr(lbl.Name, lbl.Value)
-		})
+	resource, ok := t.nodeResources[key]
+	if !ok {
+		return
 	}
+	attrs := resource.Attributes()
+	if JobInstanceOptionCFeatureGate.IsEnabled() {
+		addTargetInfoWithCoveredNameRecognition(attrs, ls)
+		return
+	}
+	ls.Range(func(lbl labels.Label) {
+		if lbl.Name == model.JobLabel || lbl.Name == model.InstanceLabel || lbl.Name == model.MetricNameLabel {
+			return
+		}
+		attrs.PutStr(lbl.Name, lbl.Value)
+	})
+}
+
+// coveredAttrAliases maps each covered attribute's underscore ("flattened")
+// spelling to its canonical dotted resource attribute name. Recognizing
+// these aliases is Option C's addition over Option C1
+// (JobInstanceOptionC1FeatureGate): a target whose target_info exposes
+// service_name/service_namespace/service_instance_id, instead of the dotted
+// spelling, still counts as a declared identity under Option C.
+var coveredAttrAliases = map[string]string{
+	"service_name":        string(conventions.ServiceNameKey),
+	"service_namespace":   string(conventions.ServiceNamespaceKey),
+	"service_instance_id": string(conventions.ServiceInstanceIDKey),
+}
+
+// addTargetInfoWithCoveredNameRecognition implements Option C's covered-name
+// recognition: a covered attribute (service.name, service.namespace,
+// service.instance.id) is recognized from either its dotted spelling or its
+// underscore alias in coveredAttrAliases. If both spellings are present
+// with the same value they collapse to one; if they disagree, the covered
+// attribute is omitted entirely rather than guessed. Recognized labels —
+// dotted or alias — are consumed and never retained as an ordinary,
+// unrelated Resource attribute.
+func addTargetInfoWithCoveredNameRecognition(attrs pcommon.Map, ls labels.Labels) {
+	type coveredValue struct {
+		val      string
+		seen     bool
+		conflict bool
+	}
+	covered := map[string]*coveredValue{
+		string(conventions.ServiceNameKey):       {},
+		string(conventions.ServiceNamespaceKey):  {},
+		string(conventions.ServiceInstanceIDKey): {},
+	}
+
+	recordCovered := func(canonical, val string) {
+		cv := covered[canonical]
+		if cv.seen && cv.val != val {
+			cv.conflict = true
+			return
+		}
+		cv.val = val
+		cv.seen = true
+	}
+
+	ls.Range(func(lbl labels.Label) {
+		if lbl.Name == model.JobLabel || lbl.Name == model.InstanceLabel || lbl.Name == model.MetricNameLabel {
+			return
+		}
+		if _, ok := covered[lbl.Name]; ok {
+			recordCovered(lbl.Name, lbl.Value)
+			return
+		}
+		if canonical, ok := coveredAttrAliases[lbl.Name]; ok {
+			recordCovered(canonical, lbl.Value)
+		}
+	})
+
+	for canonical, cv := range covered {
+		if cv.seen && !cv.conflict {
+			attrs.PutStr(canonical, cv.val)
+		}
+	}
+
+	ls.Range(func(lbl labels.Label) {
+		if lbl.Name == model.JobLabel || lbl.Name == model.InstanceLabel || lbl.Name == model.MetricNameLabel {
+			return
+		}
+		if _, ok := covered[lbl.Name]; ok {
+			return
+		}
+		if _, ok := coveredAttrAliases[lbl.Name]; ok {
+			return
+		}
+		attrs.PutStr(lbl.Name, lbl.Value)
+	})
 }
 
 func (t *transaction) addScopeInfo(key resourceKey, ls labels.Labels) {

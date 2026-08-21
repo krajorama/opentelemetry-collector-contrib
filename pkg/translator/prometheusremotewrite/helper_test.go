@@ -507,6 +507,39 @@ func Test_createLabelSet(t *testing.T) {
 			gate:           JobInstanceOptionCFeatureGate,
 			want:           getPromLabels(label11, value11, label12, value12, label31, value31, label32, value32),
 		},
+		{
+			// Option C1 shares Option C's consumer-side behavior exactly;
+			// this mirrors "option_c_declared_identity_wins_over_reserved_pair"
+			// under the C1 gate to confirm parity.
+			name: "option_c1_declared_identity_wins_over_reserved_pair",
+			resource: func() pcommon.Resource {
+				res := pcommon.NewResource()
+				res.Attributes().PutStr("service.name", "prometheus")
+				res.Attributes().PutStr("prometheus.job", "reserved-job")
+				res.Attributes().PutStr("prometheus.instance", "reserved-instance")
+				return res
+			}(),
+			orig:           lbs1,
+			externalLabels: map[string]string{},
+			extras:         []string{label31, value31, label32, value32},
+			gate:           JobInstanceOptionC1FeatureGate,
+			want:           getPromLabels(label11, value11, label12, value12, label31, value31, label32, value32, "job", "prometheus"),
+		},
+		{
+			// Mirrors "option_c_no_declared_identity_uses_reserved_pair_fallback" under C1.
+			name: "option_c1_no_declared_identity_uses_reserved_pair_fallback",
+			resource: func() pcommon.Resource {
+				res := pcommon.NewResource()
+				res.Attributes().PutStr("prometheus.job", "reserved-job")
+				res.Attributes().PutStr("prometheus.instance", "reserved-instance")
+				return res
+			}(),
+			orig:           lbs1,
+			externalLabels: map[string]string{},
+			extras:         []string{label31, value31, label32, value32},
+			gate:           JobInstanceOptionC1FeatureGate,
+			want:           getPromLabels(label11, value11, label12, value12, label31, value31, label32, value32, "job", "reserved-job", "instance", "reserved-instance"),
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -977,6 +1010,21 @@ func TestAddResourceTargetInfo(t *testing.T) {
 			resource:  resourceWithNamespacedPairOnly,
 			timestamp: testdata.TestMetricStartTimestamp,
 			gate:      JobInstanceOptionCFeatureGate,
+		},
+		{
+			// Option C1 shares Option C's consumer-side behavior exactly;
+			// this mirrors "option C: no declared identity, reserved pair
+			// used as fallback and not duplicated" under the C1 gate.
+			desc:      "option C1: no declared identity, reserved pair used as fallback and not duplicated",
+			resource:  resourceWithUndeclaredPairAndOtherAttr,
+			timestamp: testdata.TestMetricStartTimestamp,
+			gate:      JobInstanceOptionC1FeatureGate,
+			wantLabels: []prompb.Label{
+				{Name: model.MetricNameLabel, Value: "target_info"},
+				{Name: model.JobLabel, Value: "reserved-job"},
+				{Name: model.InstanceLabel, Value: "reserved-instance"},
+				{Name: "resource_attr", Value: "resource-attr-val-1"},
+			},
 		},
 	} {
 		t.Run(tc.desc, func(t *testing.T) {

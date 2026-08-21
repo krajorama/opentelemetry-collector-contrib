@@ -330,6 +330,17 @@ func TestCreateResource_JobInstanceOptions(t *testing.T) {
 				"url.scheme":          "",
 			},
 		},
+		{
+			name: "option C1: namespaced job/instance stored, service.* defaulting disabled (same storage as C)",
+			gate: JobInstanceOptionC1FeatureGate,
+			want: map[string]any{
+				"prometheus.job":      "myjob",
+				"prometheus.instance": "myhost:1234",
+				"server.address":      "myhost",
+				"server.port":         "1234",
+				"url.scheme":          "",
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -360,4 +371,11 @@ func TestValidateJobInstanceOptionGates(t *testing.T) {
 		require.NoError(t, featuregate.GlobalRegistry().Set(JobInstanceOptionBFeatureGate.ID(), false))
 	})
 	require.Error(t, ValidateJobInstanceOptionGates())
+
+	require.NoError(t, featuregate.GlobalRegistry().Set(JobInstanceOptionBFeatureGate.ID(), false))
+	require.NoError(t, featuregate.GlobalRegistry().Set(JobInstanceOptionC1FeatureGate.ID(), true))
+	t.Cleanup(func() {
+		require.NoError(t, featuregate.GlobalRegistry().Set(JobInstanceOptionC1FeatureGate.ID(), false))
+	})
+	require.Error(t, ValidateJobInstanceOptionGates(), "option A and option C1 together must be rejected")
 }
