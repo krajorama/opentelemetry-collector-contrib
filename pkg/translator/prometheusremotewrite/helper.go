@@ -24,8 +24,6 @@ import (
 	"go.opentelemetry.io/collector/pdata/pmetric"
 	conventions "go.opentelemetry.io/otel/semconv/v1.40.0"
 	"go.uber.org/multierr"
-
-	prometheustranslator "github.com/open-telemetry/opentelemetry-collector-contrib/pkg/translator/prometheus"
 )
 
 const (
@@ -304,17 +302,39 @@ func setJobAndInstanceFromPair(l map[string]string, resourceAttrs pcommon.Map, j
 // consumed as identity rather than surfaced as ordinary target_info
 // attributes.
 func identifyingAttrNames(resourceAttrs pcommon.Map) []string {
-	attrs := []string{
-		string(conventions.ServiceNamespaceKey),
-		string(conventions.ServiceNameKey),
-		string(conventions.ServiceInstanceIDKey),
-	}
 	switch {
 	case JobInstanceOptionAFeatureGate.IsEnabled():
-		attrs = append(attrs, bareJobAttr, bareInstanceAttr)
+		var attrs []string
+		if _, ok := resourceAttrs.Get(bareJobAttr); ok {
+			attrs = append(attrs, bareJobAttr)
+		} else {
+			attrs = append(attrs, string(conventions.ServiceNameKey), string(conventions.ServiceNamespaceKey))
+		}
+		if _, ok := resourceAttrs.Get(bareInstanceAttr); ok {
+			attrs = append(attrs, bareInstanceAttr)
+		} else {
+			attrs = append(attrs, string(conventions.ServiceInstanceIDKey))
+		}
+		return attrs
 	case JobInstanceOptionBFeatureGate.IsEnabled():
-		attrs = append(attrs, namespacedJobAttr, namespacedInstanceAttr)
+		var attrs []string
+		if _, ok := resourceAttrs.Get(namespacedJobAttr); ok {
+			attrs = append(attrs, namespacedJobAttr)
+		} else {
+			attrs = append(attrs, string(conventions.ServiceNameKey), string(conventions.ServiceNamespaceKey))
+		}
+		if _, ok := resourceAttrs.Get(namespacedInstanceAttr); ok {
+			attrs = append(attrs, namespacedInstanceAttr)
+		} else {
+			attrs = append(attrs, string(conventions.ServiceInstanceIDKey))
+		}
+		return attrs
 	case JobInstanceOptionCFeatureGate.IsEnabled(), JobInstanceOptionC1FeatureGate.IsEnabled():
+		attrs := []string{
+			string(conventions.ServiceNamespaceKey),
+			string(conventions.ServiceNameKey),
+			string(conventions.ServiceInstanceIDKey),
+		}
 		_, haveServiceName := resourceAttrs.Get(string(conventions.ServiceNameKey))
 		_, haveInstanceID := resourceAttrs.Get(string(conventions.ServiceInstanceIDKey))
 		if !haveServiceName && !haveInstanceID {
@@ -323,8 +343,14 @@ func identifyingAttrNames(resourceAttrs pcommon.Map) []string {
 			// ordinary attributes too.
 			attrs = append(attrs, namespacedJobAttr, namespacedInstanceAttr)
 		}
+		return attrs
+	default:
+		return []string{
+			string(conventions.ServiceNamespaceKey),
+			string(conventions.ServiceNameKey),
+			string(conventions.ServiceInstanceIDKey),
+		}
 	}
-	return attrs
 }
 
 // isValidAggregationTemporality checks whether an OTel metric has a valid
@@ -672,7 +698,7 @@ func addResourceTargetInfo(resource pcommon.Resource, settings Settings, timesta
 		name = settings.Namespace + "_" + name
 	}
 
-	labels, err := createAttributes(resource, attributes, pcommon.NewInstrumentationScope(), settings.ExternalLabels, identifyingAttrs, false, otlptranslator.LabelNamer{PreserveMultipleUnderscores: !prometheustranslator.DropSanitizationGate.IsEnabled()}, settings.DisableScopeInfo, model.MetricNameLabel, name)
+	labels, err := createAttributes(resource, attributes, pcommon.NewInstrumentationScope(), settings.ExternalLabels, identifyingAttrs, false, converter.labelNamer, settings.DisableScopeInfo, model.MetricNameLabel, name)
 	if err != nil {
 		return err
 	}

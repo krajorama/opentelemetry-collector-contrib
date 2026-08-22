@@ -307,11 +307,9 @@ func TestCreateResource_JobInstanceOptions(t *testing.T) {
 			},
 		},
 		{
-			name: "option B: namespaced job/instance stored alongside service.* defaults",
+			name: "option B: namespaced job/instance stored, service.* defaulting disabled",
 			gate: JobInstanceOptionBFeatureGate,
 			want: map[string]any{
-				"service.name":        "myjob",
-				"service.instance.id": "myhost:1234",
 				"prometheus.job":      "myjob",
 				"prometheus.instance": "myhost:1234",
 				"server.address":      "myhost",

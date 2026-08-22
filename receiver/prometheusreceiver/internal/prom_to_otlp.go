@@ -56,18 +56,10 @@ func CreateResource(job, instance string, serviceDiscoveryLabels labels.Labels) 
 		attrs.PutStr(bareInstanceAttr, instance)
 		attrs.PutStr(string(conventions.ServiceNameKey), job)
 		attrs.PutStr(string(conventions.ServiceInstanceIDKey), instance)
-	case JobInstanceOptionBFeatureGate.IsEnabled():
+	case JobInstanceOptionBFeatureGate.IsEnabled(), JobInstanceOptionCFeatureGate.IsEnabled(), JobInstanceOptionC1FeatureGate.IsEnabled():
 		attrs.PutStr(namespacedJobAttr, job)
 		attrs.PutStr(namespacedInstanceAttr, instance)
-		attrs.PutStr(string(conventions.ServiceNameKey), job)
-		attrs.PutStr(string(conventions.ServiceInstanceIDKey), instance)
-	case JobInstanceOptionCFeatureGate.IsEnabled(), JobInstanceOptionC1FeatureGate.IsEnabled():
-		attrs.PutStr(namespacedJobAttr, job)
-		attrs.PutStr(namespacedInstanceAttr, instance)
-		// Never-derive: service.name/service.instance.id are left absent here.
-		// AddTargetInfo fills them in later, only if the target declares its
-		// own identity via target_info; otherwise the reserved pair above is
-		// the resource's identity fallback on the OTLP -> Prometheus side.
+		// Defaulting of job -> service.name and instance -> service.instance.id is opt-in (disabled by default).
 	default:
 		attrs.PutStr(string(conventions.ServiceNameKey), job)
 		attrs.PutStr(string(conventions.ServiceInstanceIDKey), instance)
